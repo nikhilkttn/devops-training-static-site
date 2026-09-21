@@ -69,3 +69,84 @@ jobs:
           aws cloudfront create-invalidation \
             --distribution-id E1I55GMFDCHMAT \
             --paths "/*"
+```yaml
+name: Deploy Static Site
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # 3. Install dependencies
+      - name: Install dependencies
+        run: npm install
+
+      # 4. Run tests
+      - name: Run tests
+        run: npm test
+
+      # 5. Build application
+      - name: Build application
+        run: npm run build
+
+      # 6. Debug the actual GitHub OIDC token
+      - name: Debug OIDC Token
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken('sts.amazonaws.com');
+
+            const payload = JSON.parse(
+              Buffer.from(token.split('.')[1], 'base64url').toString()
+            );
+
+            console.log("========== OIDC TOKEN ==========");
+            console.log("OIDC issuer:", payload.iss);
+            console.log("OIDC audience:", payload.aud);
+            console.log("OIDC subject:", payload.sub);
+            console.log("Repository:", payload.repository);
+            console.log("Ref:", payload.ref);
+            console.log("Event:", payload.event_name);
+            console.log("Repository owner:", payload.repository_owner);
+            console.log("Workflow:", payload.workflow);
+            console.log("Job workflow ref:", payload.job_workflow_ref);
+            console.log("================================");
+
+      # 7. Authenticate to AWS using OIDC
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::771336636724:role/github-actions-static-site-deploy
+          aws-region: ap-south-1
+
+      # 8. Deploy to S3
+      - name: Deploy to S3
+        run: |
+          aws s3 sync dist/ s3://devops-training-static-site-nikhil-2026 --delete
+
+      # 9. Invalidate CloudFront cache
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id E1I55GMFDCHMAT \
+            --paths "/*"
+
