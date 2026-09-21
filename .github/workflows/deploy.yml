@@ -5,6 +5,7 @@ on:
     branches:
       - main
 
+# Required for GitHub OIDC authentication with AWS
 permissions:
   id-token: write
   contents: read
@@ -14,24 +15,44 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # --------------------------------------------
+      # 1. Checkout repository
+      # --------------------------------------------
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # --------------------------------------------
+      # 2. Setup Node.js
+      # --------------------------------------------
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
+      # --------------------------------------------
+      # 3. Install dependencies
+      # --------------------------------------------
       - name: Install dependencies
         run: npm install
 
+      # --------------------------------------------
+      # 4. Run tests
+      # --------------------------------------------
       - name: Run tests
         run: npm test
 
+      # --------------------------------------------
+      # 5. Build application
+      # --------------------------------------------
       - name: Build application
         run: npm run build
 
-      # Debug GitHub OIDC claims
+      # --------------------------------------------
+      # 6. Debug GitHub OIDC Token
+      # --------------------------------------------
+      # This prints OIDC claims only.
+      # DO NOT print the actual JWT token.
+      # --------------------------------------------
       - name: Debug GitHub OIDC
         uses: actions/github-script@v7
         with:
@@ -47,6 +68,7 @@ jobs:
             console.log("       GITHUB OIDC DEBUG INFORMATION");
             console.log("==============================================");
 
+            console.log("");
             console.log("Issuer (iss):");
             console.log(payload.iss);
 
@@ -134,21 +156,30 @@ jobs:
             console.log("sts.amazonaws.com");
 
             console.log("");
-            console.log("Expected Subject for main branch:");
+            console.log("Expected Subject:");
             console.log(
-              `repo:${payload.repository}:ref:refs/heads/main`
+              `repo:${payload.repository_owner}@${payload.repository_owner_id}/${payload.repository}@${payload.repository_id}:ref:${payload.ref}`
             );
 
             console.log("");
             console.log("==============================================");
 
+      # --------------------------------------------
+      # 7. Configure AWS credentials using OIDC
+      # --------------------------------------------
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::771336636724:role/github-actions-static-site-deploy
           aws-region: ap-south-1
 
-      # Verify that AWS STS successfully assumed the role
+      # --------------------------------------------
+      # 8. Verify AWS identity
+      # --------------------------------------------
+      # Do NOT use "aws configure get region" here.
+      # configure-aws-credentials sets AWS_REGION and
+      # AWS_DEFAULT_REGION as environment variables.
+      # --------------------------------------------
       - name: Verify AWS Identity
         run: |
           echo "=============================================="
@@ -159,16 +190,44 @@ jobs:
 
           echo ""
           echo "AWS Region:"
-          aws configure get region
+          echo "$AWS_REGION"
+
+          echo ""
+          echo "AWS Default Region:"
+          echo "$AWS_DEFAULT_REGION"
 
           echo "=============================================="
 
+      # --------------------------------------------
+      # 9. Deploy static files to S3
+      # --------------------------------------------
       - name: Deploy to S3
         run: |
-          aws s3 sync dist/ s3://devops-training-static-site-nikhil-2026 --delete
+          echo "=============================================="
+          echo "             S3 DEPLOYMENT"
+          echo "=============================================="
 
+          aws s3 sync \
+            dist/ \
+            s3://devops-training-static-site-nikhil-2026 \
+            --delete
+
+          echo "S3 deployment completed successfully."
+
+      # --------------------------------------------
+      # 10. Invalidate CloudFront cache
+      # --------------------------------------------
       - name: Invalidate CloudFront cache
         run: |
+          echo "=============================================="
+          echo "        CLOUDFRONT INVALIDATION"
+          echo "=============================================="
+
           aws cloudfront create-invalidation \
             --distribution-id E1I55GMFDCHMAT \
             --paths "/*"
+
+          echo "CloudFront invalidation requested successfully."
+
+          echo "=============================================="
+
